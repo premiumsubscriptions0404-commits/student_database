@@ -7,6 +7,7 @@ import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -47,6 +48,41 @@ public class StudentTools {
     }
 
     @McpTool(
+            name = "search_students",
+            description = "Search for students whose names contain the supplied text, ignoring case"
+    )
+    public List<StudentResponse> searchStudents(
+            @McpToolParam(description = "Full or partial student name", required = true) String name
+    ) {
+        String searchTerm = normalizeRequiredText(name, "Student name");
+
+        return studentRepository.findAll().stream()
+                .filter(student -> student.getName() != null
+                        && student.getName().toLowerCase(Locale.ROOT).contains(searchTerm))
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @McpTool(
+            name = "student_exists",
+            description = "Check whether a student exists by student id"
+    )
+    public Map<String, Object> studentExists(
+            @McpToolParam(description = "Student id", required = true) int id
+    ) {
+        boolean exists = studentRepository.existsById(id);
+        return Map.of("studentId", id, "exists", exists);
+    }
+
+    @McpTool(
+            name = "count_students",
+            description = "Get the total number of students"
+    )
+    public Map<String, Long> countStudents() {
+        return Map.of("count", studentRepository.count());
+    }
+
+    @McpTool(
             name = "get_student_courses",
             description = "List all courses connected to a student by student id"
     )
@@ -60,6 +96,46 @@ public class StudentTools {
                         "studentName", student.getName(),
                         "courses", student.getCourses().stream()
                                 .map(this::toResponse)
+                                .toList()
+                ))
+                .orElseGet(() -> Map.of(
+                        "found", false,
+                        "message", "No student found with id " + id
+                ));
+    }
+
+    @McpTool(
+            name = "find_students_by_course",
+            description = "Find students enrolled in a course whose name matches the supplied text, ignoring case"
+    )
+    public List<StudentResponse> findStudentsByCourse(
+            @McpToolParam(description = "Full or partial course name", required = true) String courseName
+    ) {
+        String searchTerm = normalizeRequiredText(courseName, "Course name");
+
+        return studentRepository.findAll().stream()
+                .filter(student -> student.getCourses().stream()
+                        .anyMatch(course -> course.getName() != null
+                                && course.getName().toLowerCase(Locale.ROOT).contains(searchTerm)))
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @McpTool(
+            name = "get_student_summary",
+            description = "Get a compact student summary including course count and course names"
+    )
+    public Object getStudentSummary(
+            @McpToolParam(description = "Student id", required = true) int id
+    ) {
+        return studentRepository.findById(id)
+                .<Object>map(student -> Map.of(
+                        "found", true,
+                        "studentId", student.getId(),
+                        "studentName", student.getName(),
+                        "courseCount", student.getCourses().size(),
+                        "courseNames", student.getCourses().stream()
+                                .map(Course::getName)
                                 .toList()
                 ))
                 .orElseGet(() -> Map.of(
@@ -105,6 +181,13 @@ public class StudentTools {
 
     private CourseResponse toResponse(Course course) {
         return new CourseResponse(course.getId(), course.getName());
+    }
+
+    private String normalizeRequiredText(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(fieldName + " must not be blank");
+        }
+        return value.trim().toLowerCase(Locale.ROOT);
     }
 
     public record StudentResponse(
